@@ -9,8 +9,18 @@ android {
         applicationId = "com.school.pendrivesync"
         minSdk = 24
         targetSdk = 30   // keeps plain File access to USB drives working with "All files access"
-        versionCode = 1
-        versionName = "0.1"
+        // goes up automatically with every GitHub build, so updates always install over the old app
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionName = "0.2"
+    }
+    signingConfigs {
+        // Same key on every build => new APKs install as UPDATES (data and PIN are kept)
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

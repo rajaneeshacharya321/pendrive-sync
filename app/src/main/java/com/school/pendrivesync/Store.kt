@@ -8,13 +8,15 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.os.Build
 import android.os.Environment
 import java.io.File
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 object Paths {
-    val root: File get() = File(Environment.getExternalStorageDirectory(), "StudyMaterials")
-    val collected: File get() = File(root, "Collected")
+    /** Shared "device storage" location (visible in any file manager). Log file always lives here. */
+    val deviceRoot: File get() = File(Environment.getExternalStorageDirectory(), "StudyMaterials")
 }
 
 object Access {
@@ -33,8 +35,8 @@ object AppLog {
         lines.add(line)
         if (lines.size > 200) lines.removeAt(0)
         try {
-            Paths.root.mkdirs()
-            File(Paths.root, "log.txt").appendText(line + "\n")
+            Paths.deviceRoot.mkdirs()
+            File(Paths.deviceRoot, "log.txt").appendText(line + "\n")
         } catch (_: Exception) {}
         listener?.invoke()
     }
@@ -43,21 +45,64 @@ object AppLog {
 }
 
 class Store(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "sync.db", null, 1) {
-    private val prefs = ctx.applicationContext.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+    companion object {
+        /** PIN that works until someone changes it inside the app. */
+        const val DEFAULT_PIN = "8391027582394851"
+    }
+
+    private val appCtx = ctx.applicationContext
+    private val prefs = appCtx.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+
+    /** Preset master ID baked into the APK (assets/master_id.txt). Empty = first drive inserted becomes master. */
+    private val preset: String by lazy {
+        try {
+            appCtx.assets.open("master_id.txt").bufferedReader().use { it.readLines() }
+                .map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") }?.uppercase() ?: ""
+        } catch (_: Exception) { "" }
+    }
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE copied(uuid TEXT, rel TEXT, size INTEGER, mtime INTEGER, PRIMARY KEY(uuid, rel, size, mtime))")
     }
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
 
+    // ---- master drives ----
     var masters: Set<String>
-        get() = HashSet(prefs.getStringSet("masters", emptySet()) ?: emptySet())
+        get() {
+            val m = HashSet(prefs.getStringSet("masters", emptySet()) ?: emptySet())
+            if (preset.isNotEmpty()) m.add(preset)
+            return m
+        }
         set(v) { prefs.edit().putStringSet("masters", HashSet(v)).apply() }
 
     var armAlt: Boolean
         get() = prefs.getBoolean("armAlt", false)
         set(v) { prefs.edit().putBoolean("armAlt", v).apply() }
 
+    // ---- save location: true = device storage (/sdcard/StudyMaterials), false = app's own storage ----
+    var saveOnDevice: Boolean
+        get() = prefs.getBoolean("onDevice", true)
+        set(v) { prefs.edit().putBoolean("onDevice", v).apply() }
+
+    fun root(): File = if (saveOnDevice) Paths.deviceRoot else File(appCtx.filesDir, "StudyMaterials")
+    fun collected(): File = File(root(), "Collected")
+
+    // ---- PIN (stored as salted hash) ----
+    private fun hash(salt: String, pin: String): String =
+        MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray()).joinToString("") { "%02x".format(it) }
+
+    fun checkPin(p: String): Boolean {
+        val h = prefs.getString("pinHash", null) ?: return p == DEFAULT_PIN
+        val salt = prefs.getString("pinSalt", "") ?: ""
+        return MessageDigest.isEqual(hash(salt, p).toByteArray(), h.toByteArray())
+    }
+
+    fun setPin(p: String) {
+        val salt = UUID.randomUUID().toString()
+        prefs.edit().putString("pinSalt", salt).putString("pinHash", hash(salt, p)).apply()
+    }
+
+    // ---- copy bookkeeping ----
     fun has(uuid: String, rel: String, size: Long, mtime: Long): Boolean =
         readableDatabase.rawQuery(
             "SELECT 1 FROM copied WHERE uuid=? AND rel=? AND size=? AND mtime=?",

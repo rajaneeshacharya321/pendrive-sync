@@ -49,7 +49,7 @@ class SyncService : Service() {
 
     private fun notif(text: String): Notification {
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "sync") else Notification.Builder(this)
-        return b.setContentTitle("Pendrive Sync").setContentText(text)
+        return b.setContentTitle(getString(R.string.app_name)).setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_save).build()
     }
     private fun note(t: String) = getSystemService(NotificationManager::class.java).notify(1, notif(t))
@@ -90,12 +90,12 @@ class SyncService : Service() {
         if (u in store.masters) {
             note("Master drive: exporting...")
             AppLog.add("Master drive detected, exporting")
-            val n = Syncer.exportTo(dir)
+            val n = Syncer.exportTo(dir, store)
             AppLog.add(if (n < 0) "Export FAILED: not enough free space on master" else "Export done: $n file(s) copied")
         } else {
             note("Copying from $label...")
             val n = Syncer.importFrom(dir, u, label, store)
-            AppLog.add("Imported $n new file(s) from '$label' ($u)")
+            AppLog.add("Imported from '$label' ($u): $n")
         }
         note("Done - safe to remove drive")
         AppLog.add("Safe to remove drive")
