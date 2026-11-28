@@ -1,0 +1,6 @@
+<resources>
+    <!-- Android 11 and older: the window background is the first thing you see -->
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/window_bg</item>
+    </style>
+</resources>

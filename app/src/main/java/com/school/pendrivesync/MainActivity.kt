@@ -2,63 +2,42 @@ package com.school.pendrivesync
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.ProgressBar
 
 /**
- * No options, no menus. Shows either
- *   - the screen image chosen at build time (assets/screen_image), full screen and for good, or
- *   - a plain loading spinner if no image was chosen.
- * The real work happens in SyncService.
+ * No options, no menus. The screen is your logo centred on your colour - the same picture Android shows
+ * while the app starts - and it stays that way. The real work happens in SyncService.
  */
 class MainActivity : Activity() {
     companion object { private var asked = false }
 
-    private var hasImage = false
-
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        val bmp = loadScreenImage()
-        hasImage = bmp != null
-        if (bmp != null) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            val iv = ImageView(this).apply {
-                setBackgroundColor(Color.BLACK)
-                setImageBitmap(bmp)
-                scaleType = if (Store(this@MainActivity).fillScreen) ImageView.ScaleType.CENTER_CROP
-                            else ImageView.ScaleType.FIT_CENTER
-            }
-            setContentView(iv)
-        } else {
-            val root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#101418")) }
-            root.addView(ProgressBar(this), FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-            setContentView(root)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val dm = resources.displayMetrics
+        val shorter = minOf(dm.widthPixels, dm.heightPixels)
+        // "normal" = 288dp, exactly what the Android start-up screen uses, so there is no visible jump
+        val canvas = when (Store(this).logoSize) {
+            "large" -> (shorter * 0.75f).toInt()
+            "xlarge" -> (shorter * 1.125f).toInt()
+            else -> (288 * dm.density).toInt()
         }
+        val root = FrameLayout(this).apply { setBackgroundColor(getColor(R.color.screen_bg)) }
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.splash_logo)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        root.addView(logo, FrameLayout.LayoutParams(canvas, canvas, Gravity.CENTER))
+        setContentView(root)
     }
-
-    /** Reads assets/screen_image (PNG or JPEG), scaled down if it is huge. Returns null when there is none. */
-    private fun loadScreenImage(): Bitmap? = try {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        assets.open("screen_image").use { BitmapFactory.decodeStream(it, null, bounds) }
-        var sample = 1
-        while (bounds.outWidth / sample > 2600 || bounds.outHeight / sample > 2600) sample *= 2
-        assets.open("screen_image").use {
-            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-        }
-    } catch (_: Exception) { null }
 
     @Suppress("DEPRECATION")
     private fun goImmersive() {
@@ -70,14 +49,12 @@ class MainActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && hasImage) goImmersive()
+        if (hasFocus) goImmersive()
     }
 
-    /** With a screen image the app "stays like that": Back does nothing. (Home still works.) */
+    /** The screen "stays like that": Back does nothing. (Home still works.) */
     @Suppress("OVERRIDE_DEPRECATION")
-    override fun onBackPressed() {
-        if (!hasImage) super.onBackPressed()
-    }
+    override fun onBackPressed() {}
 
     override fun onResume() {
         super.onResume()

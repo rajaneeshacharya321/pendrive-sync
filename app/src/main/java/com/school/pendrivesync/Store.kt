@@ -43,7 +43,7 @@ object AppLog {
  *                  "device" -> files live in /StudyMaterials on the device (visible in a file manager)
  *   masterIds    : pendrive IDs that receive an export of everything collected.
  *                  Empty list -> the very first pendrive inserted becomes the master.
- *   screenFit    : "fit" or "fill" - how the optional screen image (assets/screen_image) is shown.
+ *   logoSize     : "normal" | "large" | "xlarge" - how big the logo is on the permanent screen.
  */
 class Store(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "sync.db", null, 1) {
     private val appCtx = ctx.applicationContext
@@ -55,8 +55,8 @@ class Store(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "sync.db", 
     }
 
     val saveOnDevice: Boolean get() = cfg.optString("saveLocation", "app").equals("device", ignoreCase = true)
-    /** true = the screen image fills the whole screen (edges cropped); false = whole image is shown. */
-    val fillScreen: Boolean get() = cfg.optString("screenFit", "fit").equals("fill", ignoreCase = true)
+    /** Size of the logo on the permanent screen: "normal" (same as the Android start-up screen), "large" or "xlarge". */
+    val logoSize: String get() = cfg.optString("logoSize", "normal").lowercase()
 
     private val presetMasters: Set<String> by lazy {
         val out = HashSet<String>()
