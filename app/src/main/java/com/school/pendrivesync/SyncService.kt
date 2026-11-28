@@ -81,10 +81,6 @@ class SyncService : Service() {
         if (store.masters.isEmpty()) {
             store.masters = setOf(u)
             AppLog.add("First drive '$label' ($u) registered as MASTER")
-        } else if (store.armAlt && u !in store.masters) {
-            store.masters = store.masters + u
-            store.armAlt = false
-            AppLog.add("Drive '$label' ($u) registered as ALT master")
         }
 
         if (u in store.masters) {

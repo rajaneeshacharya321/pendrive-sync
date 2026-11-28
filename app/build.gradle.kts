@@ -11,7 +11,7 @@ android {
         targetSdk = 30   // keeps plain File access to USB drives working with "All files access"
         // goes up automatically with every GitHub build, so updates always install over the old app
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "0.2"
+        versionName = "0.4"
     }
     signingConfigs {
         // Same key on every build => new APKs install as UPDATES (data and PIN are kept)
@@ -28,4 +28,4 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 }
-dependencies { implementation("androidx.core:core-ktx:1.12.0") }
+dependencies { }

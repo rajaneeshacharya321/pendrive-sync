@@ -7,15 +7,14 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.os.Build
 import android.os.Environment
+import org.json.JSONObject
 import java.io.File
-import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
 
 object Paths {
-    /** Shared "device storage" location (visible in any file manager). Log file always lives here. */
+    /** Shared "device storage" location (visible in any file manager). */
     val deviceRoot: File get() = File(Environment.getExternalStorageDirectory(), "StudyMaterials")
 }
 
@@ -26,83 +25,68 @@ object Access {
 }
 
 object AppLog {
-    private val lines = mutableListOf<String>()
-    @Volatile var listener: (() -> Unit)? = null
     private val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+    @Volatile var dir: File? = null
 
     @Synchronized fun add(msg: String) {
-        val line = "${fmt.format(Date())}  $msg"
-        lines.add(line)
-        if (lines.size > 200) lines.removeAt(0)
+        val d = dir ?: return
         try {
-            Paths.deviceRoot.mkdirs()
-            File(Paths.deviceRoot, "log.txt").appendText(line + "\n")
+            d.mkdirs()
+            File(d, "log.txt").appendText("${fmt.format(Date())}  $msg\n")
         } catch (_: Exception) {}
-        listener?.invoke()
     }
-
-    @Synchronized fun tail(n: Int): List<String> = lines.takeLast(n)
 }
 
+/**
+ * All settings are decided when the APK is BUILT (assets/config.json). There are no options inside the app.
+ *   saveLocation : "app"    -> files live in the app's private storage (default)
+ *                  "device" -> files live in /StudyMaterials on the device (visible in a file manager)
+ *   masterIds    : pendrive IDs that receive an export of everything collected.
+ *                  Empty list -> the very first pendrive inserted becomes the master.
+ *   screenFit    : "fit" or "fill" - how the optional screen image (assets/screen_image) is shown.
+ */
 class Store(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "sync.db", null, 1) {
-    companion object {
-        /** PIN that works until someone changes it inside the app. */
-        const val DEFAULT_PIN = "8391027582394851"
-    }
-
     private val appCtx = ctx.applicationContext
     private val prefs = appCtx.getSharedPreferences("cfg", Context.MODE_PRIVATE)
 
-    /** Preset master ID baked into the APK (assets/master_id.txt). Empty = first drive inserted becomes master. */
-    private val preset: String by lazy {
-        try {
-            appCtx.assets.open("master_id.txt").bufferedReader().use { it.readLines() }
-                .map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") }?.uppercase() ?: ""
-        } catch (_: Exception) { "" }
+    private val cfg: JSONObject by lazy {
+        try { JSONObject(appCtx.assets.open("config.json").bufferedReader().use { it.readText() }) }
+        catch (_: Exception) { JSONObject() }
     }
+
+    val saveOnDevice: Boolean get() = cfg.optString("saveLocation", "app").equals("device", ignoreCase = true)
+    /** true = the screen image fills the whole screen (edges cropped); false = whole image is shown. */
+    val fillScreen: Boolean get() = cfg.optString("screenFit", "fit").equals("fill", ignoreCase = true)
+
+    private val presetMasters: Set<String> by lazy {
+        val out = HashSet<String>()
+        val arr = cfg.optJSONArray("masterIds")
+        if (arr != null) for (i in 0 until arr.length()) {
+            val s = arr.optString(i).trim().uppercase()
+            if (s.isNotEmpty()) out.add(s)
+        }
+        out
+    }
+
+    fun root(): File = if (saveOnDevice) Paths.deviceRoot else File(appCtx.filesDir, "StudyMaterials")
+    fun collected(): File = File(root(), "Collected")
+
+    init { AppLog.dir = root() }
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE copied(uuid TEXT, rel TEXT, size INTEGER, mtime INTEGER, PRIMARY KEY(uuid, rel, size, mtime))")
     }
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
 
-    // ---- master drives ----
+    /** Master drives = the ones set at build time + (only if none were set) the first drive ever inserted. */
     var masters: Set<String>
         get() {
             val m = HashSet(prefs.getStringSet("masters", emptySet()) ?: emptySet())
-            if (preset.isNotEmpty()) m.add(preset)
+            m.addAll(presetMasters)
             return m
         }
         set(v) { prefs.edit().putStringSet("masters", HashSet(v)).apply() }
 
-    var armAlt: Boolean
-        get() = prefs.getBoolean("armAlt", false)
-        set(v) { prefs.edit().putBoolean("armAlt", v).apply() }
-
-    // ---- save location: true = device storage (/sdcard/StudyMaterials), false = app's own storage ----
-    var saveOnDevice: Boolean
-        get() = prefs.getBoolean("onDevice", true)
-        set(v) { prefs.edit().putBoolean("onDevice", v).apply() }
-
-    fun root(): File = if (saveOnDevice) Paths.deviceRoot else File(appCtx.filesDir, "StudyMaterials")
-    fun collected(): File = File(root(), "Collected")
-
-    // ---- PIN (stored as salted hash) ----
-    private fun hash(salt: String, pin: String): String =
-        MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray()).joinToString("") { "%02x".format(it) }
-
-    fun checkPin(p: String): Boolean {
-        val h = prefs.getString("pinHash", null) ?: return p == DEFAULT_PIN
-        val salt = prefs.getString("pinSalt", "") ?: ""
-        return MessageDigest.isEqual(hash(salt, p).toByteArray(), h.toByteArray())
-    }
-
-    fun setPin(p: String) {
-        val salt = UUID.randomUUID().toString()
-        prefs.edit().putString("pinSalt", salt).putString("pinHash", hash(salt, p)).apply()
-    }
-
-    // ---- copy bookkeeping ----
     fun has(uuid: String, rel: String, size: Long, mtime: Long): Boolean =
         readableDatabase.rawQuery(
             "SELECT 1 FROM copied WHERE uuid=? AND rel=? AND size=? AND mtime=?",
